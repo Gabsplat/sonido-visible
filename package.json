@@ -1,0 +1,12 @@
+{
+  "name": "sonido-visible",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "shot": "node scripts/shot.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
