@@ -4,6 +4,8 @@ Un lápiz dibuja el sonido como un sismógrafo y, debajo, lo convierte en paisaj
 
 ## Uso
 
+Publicado en GitHub Pages: https://gabsplat.github.io/sonido-visible/ (rama `main`, raíz del repositorio; cada push vuelve a publicar).
+
 ```sh
 pnpm start            # servidor estático en 127.0.0.1:4400 (PORT para cambiarlo)
 pnpm shot 8,24        # arranca la canción, captura en esos segundos y mide el costo por cuadro (BTN=#demo para la demo)
