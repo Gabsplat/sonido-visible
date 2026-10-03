@@ -2,7 +2,7 @@
 import { INK, clamp } from './core.js';
 import { Sound, noteFreq } from './audio.js';
 import { Stage } from './stage.js';
-import { SONG } from './song.js';
+import { SONG, CUMBRE } from './song.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -34,15 +34,17 @@ const sound = new Sound();
 const stage = new Stage($('#hoja'), $('header'));
 const status = $('#estado');
 const meters = [...document.querySelectorAll('.k i b')];
-const buttons = { mic: $('#mic'), demo: $('#demo'), song: $('#cancion') };
+const buttons = { mic: $('#mic'), demo: $('#demo'), song: $('#cancion'), epic: $('#cumbre') };
 
 const say = (t) => (status.textContent = t);
 const mark = () => {
   buttons.mic.classList.toggle('on', sound.mode === 'micrófono');
   buttons.demo.classList.toggle('on', sound.mode === 'demo');
   buttons.demo.textContent = sound.mode === 'demo' ? 'Parar demo' : 'Demo';
-  buttons.song.classList.toggle('on', sound.mode === 'canción');
-  buttons.song.textContent = sound.mode === 'canción' ? 'Parar canción' : 'Canción';
+  for (const [b, song, label] of [[buttons.song, SONG, 'Canción'], [buttons.epic, CUMBRE, 'Cumbre']]) {
+    b.classList.toggle('on', sound.mode === song.title);
+    b.textContent = sound.mode === song.title ? `Parar ${label.toLowerCase()}` : label;
+  }
 };
 
 buttons.mic.addEventListener('click', async () => {
@@ -59,14 +61,16 @@ buttons.mic.addEventListener('click', async () => {
   mark();
 });
 
-buttons.song.addEventListener('click', () => {
-  if (sound.mode === 'canción') { sound.stopSources(); say('Canción detenida.'); }
-  else { sound.startSong(); say(`♪ ${SONG.title}`); }
-  mark();
-});
+for (const [b, song] of [[buttons.song, SONG], [buttons.epic, CUMBRE]]) {
+  b.addEventListener('click', () => {
+    if (sound.mode === song.title) { sound.stopSources(); say(`«${song.title}» detenida.`); }
+    else { sound.startSong(song); say(`♪ ${song.title}`); }
+    mark();
+  });
+}
 sound.onSection = (name) => {
   stage.annotate(name);
-  say(`♪ ${SONG.title} — ${name}`);
+  say(`♪ ${sound.song.title} — ${name}`);
 };
 
 buttons.demo.addEventListener('click', () => {
@@ -75,13 +79,21 @@ buttons.demo.addEventListener('click', () => {
   mark();
 });
 
-$('#archivo').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
+// Archivo propio: se analiza en el navegador, no se sube a ningún lado.
+async function playFile(file) {
   if (!file) return;
   try { await sound.useFile(file); say(`Sonando «${file.name}» en bucle.`); }
   catch { say('No se pudo reproducir ese archivo.'); }
-  e.target.value = '';
   mark();
+}
+$('#archivo').addEventListener('change', (e) => { playFile(e.target.files[0]); e.target.value = ''; });
+addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('soltar'); });
+addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('soltar'); });
+addEventListener('drop', (e) => {
+  e.preventDefault();
+  document.body.classList.remove('soltar');
+  const file = [...e.dataTransfer.files].find((f) => f.type.startsWith('audio/') || /\.(mp3|wav|ogg|flac|m4a|aac)$/i.test(f.name));
+  if (file) playFile(file); else say('Eso no parece un archivo de audio.');
 });
 
 $('#guardar').addEventListener('click', () => {

@@ -85,7 +85,7 @@ h1 {
 
 .extras { margin: 3px 0 0; font: 13px/1.3 var(--hand); color: rgb(150, 90, 40); }
 
-.lado { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 640px; }
+.lado { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; max-width: 780px; }
 
 nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
@@ -127,4 +127,19 @@ kbd {
   nav { justify-content: flex-start; }
   .ayuda, #estado { text-align: left; }
   .ayuda { display: none; }
+}
+
+body.soltar::before {
+  content: "Soltá el audio para dibujarlo";
+  position: fixed;
+  inset: 14px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  font: 28px var(--hand);
+  color: var(--b);
+  border: 2px dashed var(--b);
+  border-radius: 18px 6px 22px 8px;
+  background: rgba(243, 237, 222, 0.6);
+  pointer-events: none;
 }

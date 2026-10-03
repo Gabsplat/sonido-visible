@@ -1,6 +1,8 @@
 // Escenario: el sismógrafo arriba y el paisaje abajo, dibujados de a poco en dos
 // lienzos circulares (anillos) que se desplazan bajo un lápiz quieto.
 import { INK, LABEL_FONT, clamp, lerp, mod, rnd, noise, fbm, line } from './core.js';
+
+const GREEN = 'rgb(64,150,112)';
 import { makePencil } from './pencil.js';
 
 export const SPEED = 72; // px de papel por segundo
@@ -25,7 +27,10 @@ export class Stage {
     this.trees = Array.from({ length: 24 }, () => ({ on: false, x: 0, s: 1 }));
     this.drops = Array.from({ length: 320 }, () => ({ on: false, x: 0, y: 0, v: 0, l: 0 }));
     this.bolt = new Float32Array(64); // rayo: pares x, y en pantalla
-    this.k = { x: 0, px: 0, fy: 0, pfy: 0, ny: 0, pny: 0, tx: 0, ts: 1, sx: 0, sy: 0, sr: 0, wet: 0, text: '', storm: 0 };
+    this.winds = Array.from({ length: 80 }, () => ({ on: false, x: 0, y: 0, v: 0, l: 0, ph: 0 }));
+    this.meteors = Array.from({ length: 8 }, () => ({ on: false, x: 0, y: 0, t: 0 }));
+    this.fires = Array.from({ length: 12 }, () => ({ on: false, x: 0, y: 0, t: 0, r: 0, n: 0, ink: '' }));
+    this.k = { x: 0, px: 0, fy: 0, pfy: 0, ny: 0, pny: 0, tx: 0, ts: 1, sx: 0, sy: 0, sr: 0, wet: 0, text: '', storm: 0, night: 0, drop: 0 };
     this.t = 0;
     this.resize();
   }
@@ -74,6 +79,20 @@ export class Stage {
     this.lastCloud = -99;
     this.boltT = 9; // tiempo desde el último rayo
     this.boltN = 0;
+    // Forma del tema: noche (corte sin bajo), viento (subida) y drop.
+    this.v = SPEED;
+    this.lowSlow = 0;
+    this.lowRef = 0;
+    this.playing = 0;
+    this.night = 0;
+    this.nightHeld = 0;
+    this.windV = 0;
+    this.windPeak = 0;
+    this.dropV = 0;
+    this.dropT = 0;
+    this.flashT = 9;
+    this.shake = 0;
+    this.lastMoon = -99;
     this.lTip = this.farY;
     this.nextTick = 0;
     this.lastSun = -99;
@@ -81,6 +100,7 @@ export class Stage {
     for (const b of this.birds) b.on = false;
     for (const t of this.trees) t.on = false;
     for (const r of this.drops) r.on = false;
+    for (const p of [...this.winds, ...this.meteors, ...this.fires]) p.on = false;
   }
 
   // Fondo fijo de la cinta: renglones azules y la línea central.
@@ -124,8 +144,10 @@ export class Stage {
 
   step(dt, f) {
     this.t += dt;
+    this.stepMood(f, dt);
+    this.v += (SPEED * (1 + 0.6 * this.dropV) - this.v) * (1 - Math.exp(-dt / 0.5));
     this.prevHead = this.head;
-    this.head += SPEED * dt;
+    this.head += this.v * dt;
     this.clearAhead(this.S, this.sH);
     this.clearAhead(this.L, this.lH);
     this.stepSeis(f);
@@ -180,7 +202,7 @@ export class Stage {
     c.beginPath(); c.arc(x, 6, 2.1, 0, 7); c.stroke();
     c.beginPath(); c.arc(x, h - 6, 2.1, 0, 7); c.stroke();
     if (major && x > 0) {
-      const s = Math.round(x / SPEED);
+      const s = Math.round(this.t);
       c.globalAlpha = 0.55;
       c.fillStyle = INK.b;
       c.font = `12px ${LABEL_FONT}`;
@@ -211,6 +233,8 @@ export class Stage {
     this.nearHist[mod(x - 1, this.rW)] = (k.ny + k.pny) / 2;
     this.farHist[mod(x, this.rW)] = this.farHist[mod(x - 1, this.rW)] = k.fy;
     k.wet = this.wet;
+    k.night = this.night;
+    k.drop = this.dropV;
     this.paint(this.L, x, 40, this.drawColumn);
     this.landX = x; this.farY = k.fy; this.nearY = k.ny;
   }
@@ -218,7 +242,27 @@ export class Stage {
   drawColumn(c) {
     const { x, px, fy, pfy, ny, pny } = this.k, g = this.ground, H = this.lH;
     // Cordillera (graves): cresta y sombreado inclinado, más denso en la ladera que baja.
-    line(c, px, pfy, x, fy, 1.25, 0.82);
+    const { night, drop } = this.k;
+    // Noche: el cielo se sombrea con trazos horizontales y aparecen estrellas.
+    for (let i = 0; i < 2; i++) {
+      if (night > 0.05 && rnd(x, 60 + i * 7) < night * 0.75) {
+        const y = 6 + rnd(x, 61 + i * 7) ** 0.8 * (fy - 30);
+        if (y > 6) line(c, x - 6 - rnd(x, 62 + i * 7) * 14, y, x, y + 0.4, 0.8, 0.05 + 0.09 * night);
+      }
+    }
+    if (night > 0.3 && rnd(x, 63) < night * 0.04) {
+      const y = 8 + rnd(x, 64) * (fy - 50), r = 1.5 + rnd(x, 65) * 2.5;
+      if (y > 8) { line(c, x - r, y, x + r * 0.2, y, 0.8, 0.75); line(c, x - r * 0.4, y - r, x - r * 0.4, y + r, 0.8, 0.75); }
+    }
+    // Drop: cortina de aurora en tinta azul y verde.
+    if (drop > 0.1 && x % 2 === 0) {
+      const yA = H * 0.1 + Math.sin(x * 0.007 + Math.sin(x * 0.0021) * 2.2) * H * 0.05;
+      const sway = (noise(x * 0.02, 50) + 1) * 0.5, fold = (noise(x * 0.11, 52) + 1) * 0.5;
+      let len = (10 + 70 * sway * sway + 18 * fold) * drop;
+      if (yA + len > fy - 14) len = fy - 14 - yA;
+      if (len > 4) line(c, x, yA, x - 1.5, yA + len, 0.9, (0.12 + 0.22 * rnd(x, 51)) * drop, x % 4 ? INK.b : GREEN);
+    }
+    line(c, px, pfy, x, fy, 1.25 + drop * 0.9, 0.82);
     if (x % 4 === 0 && g - fy > 12) {
       const slope = (fy - pfy) / 2, r = rnd(x, 1);
       const len = Math.min((g - fy) * 0.55, 16 + this.lowV * 26) * (0.55 + 0.45 * r);
@@ -281,12 +325,16 @@ export class Stage {
     if (o[1] > 0) {
       for (let i = 0, n = 1 + ((Math.random() * 3) | 0); i < n; i++) this.addTree(this.head - 2 - i * 8, 0.6 + o[1] * 0.8);
     }
-    if (o[2] > 0) for (let i = 0, n = 1 + ((o[2] * 3) | 0); i < n; i++) this.addBird(o[2]);
-    if (f.loud > 0) {
+    if (o[2] > 0) {
+      if (this.night > 0.5) this.addMeteor();
+      else for (let i = 0, n = 1 + ((o[2] * 3) | 0); i < n; i++) this.addBird(o[2]);
+    }
+    if (f.loud > 0 && this.dropV > 0) this.addFire(0);
+    else if (f.loud > 0) {
       if (f.noise > 0.25 || this.rainV > 0.08 || f.onset[2] > 0) this.addBolt();
       else if (this.t - this.lastSun > 12) this.addSun();
     }
-    this.rainV += (clamp(f.noise * 1.4) * clamp(f.high * 1.5) - this.rainV) * (1 - Math.exp(-dt / 0.6));
+    this.rainV += (clamp(f.noise * 1.4) * clamp(f.high * 1.5) * (1 - this.night) - this.rainV) * (1 - Math.exp(-dt / 0.6));
     this.padV += (clamp(f.mid * 1.3) * (1 - clamp(f.noise * 2)) - this.padV) * (1 - Math.exp(-dt / 1.5));
     const cloudGap = this.rainV > 0.2 ? 1.6 : 3.2;
     if ((this.rainV > 0.2 || this.padV > 0.4) && this.t - this.lastCloud > cloudGap) this.addCloud(this.rainV > 0.2);
@@ -304,15 +352,126 @@ export class Stage {
       if (!b.on) continue;
       b.ph += dt * b.fr;
       b.vy += (-3 - b.vy) * dt * 0.6;
-      b.x += (b.vx - SPEED) * dt;
+      b.x += (b.vx - this.v) * dt;
       b.y += (b.vy + Math.sin(b.ph * 0.3) * 6) * dt;
       if (b.y < top) { b.y = top; b.vy = 0; }
       if (b.x < -30) b.on = false;
     }
   }
 
+  // ---------- La forma del tema ----------
+
+  stepMood(f, dt) {
+    const e = (tau) => 1 - Math.exp(-dt / tau);
+    this.lowSlow += (f.sub - this.lowSlow) * e(1.6);
+    this.playing += ((f.level > 0.015 ? 1 : 0) - this.playing) * e(0.8);
+    // Corte: sigue sonando algo pero los graves cayeron a un tercio de lo que venían siendo.
+    this.lowRef = Math.max(this.lowRef * Math.exp(-dt / 20), this.lowSlow);
+    const cut = this.lowSlow < Math.max(0.13, this.lowRef * 0.35) && this.lowRef > 0.25 && this.playing > 0.5 && this.dropV < 0.3;
+    this.night += ((cut ? 1 : 0) - this.night) * e(this.dropV > 0 ? 0.4 : 1.4);
+    this.nightHeld = this.night > 0.6 ? this.nightHeld + dt : this.night < 0.3 ? 0 : this.nightHeld;
+    // Subida: ruido que crece sin bajo.
+    const rise = this.lowSlow < Math.max(0.2, this.lowRef * 0.4) ? clamp(f.noise * 1.6) * clamp(f.high * 1.6) : 0;
+    this.windV += (rise - this.windV) * e(0.4);
+    this.windPeak = Math.max(this.windPeak * Math.exp(-dt / 8), this.windV);
+    // Drop: vuelven los graves de golpe después de una subida o de un corte largo.
+    if (f.onset[0] > 0.4 && this.dropV < 0.3 && (this.windPeak > 0.3 || this.nightHeld > 10)) this.drop();
+    if (this.dropV > 0) {
+      this.dropT += dt;
+      this.dropV = this.dropT < 4 || this.lowSlow > 0.12 ? Math.min(1, this.dropV + dt * 2) : Math.max(0, this.dropV - dt * 0.35);
+    }
+    this.shake *= Math.exp(-dt / 0.09);
+    if (f.onset[0] > 0 && this.dropV > 0.3) this.shake = Math.max(this.shake, 3 * this.dropV * f.onset[0]);
+    this.flashT += dt;
+    if (this.night > 0.7 && this.t - this.lastMoon > 25) this.addMoon();
+    this.stepFx(dt);
+  }
+
+  drop() {
+    this.dropV = 0.05;
+    this.dropT = 0;
+    this.flashT = 0;
+    this.shake = 7;
+    this.windPeak = 0;
+    this.nightHeld = 0;
+    for (let i = 0; i < 4; i++) this.addFire(-i * 0.22);
+  }
+
+  stepFx(dt) {
+    const want = this.windV * 140 * dt;
+    let n = Math.floor(want) + (Math.random() < want % 1 ? 1 : 0);
+    for (const w of this.winds) {
+      if (w.on) {
+        w.x -= w.v * dt;
+        if (w.x + w.l < -20) w.on = false;
+      } else if (n > 0) {
+        n--;
+        w.on = true;
+        w.x = this.W + Math.random() * 60;
+        w.y = this.lTop + 10 + Math.random() * this.lH * 0.85;
+        w.v = 700 + Math.random() * 600;
+        w.l = 30 + Math.random() * 80;
+        w.ph = Math.random() * 6;
+      }
+    }
+    for (const m of this.meteors) if (m.on && (m.t += dt) > 0.8) m.on = false;
+    for (const p of this.fires) {
+      if (!p.on) continue;
+      p.t += dt;
+      p.x -= this.v * dt;
+      if (p.t > 1.7) p.on = false;
+    }
+  }
+
+  addMeteor() {
+    const m = this.meteors.find((m) => !m.on);
+    if (!m) return;
+    m.on = true;
+    m.t = 0;
+    m.x = this.headX * (0.35 + Math.random() * 0.65);
+    m.y = this.lTop + this.lH * (0.04 + Math.random() * 0.2);
+  }
+
+  addFire(delay) {
+    const p = this.fires.find((p) => !p.on);
+    if (!p) return;
+    p.on = true;
+    p.t = delay;
+    p.x = this.headX * (0.25 + Math.random() * 0.65);
+    p.y = this.lTop + this.lH * (0.1 + Math.random() * 0.22);
+    p.r = 45 + Math.random() * 45;
+    p.n = 14 + ((Math.random() * 10) | 0);
+    p.ink = [INK.w, INK.b, INK.g, GREEN][(Math.random() * 4) | 0];
+  }
+
+  addMoon() {
+    const r = 16, y = this.lH * 0.13;
+    if (this.farY < y + r + 14) return;
+    this.lastMoon = this.t;
+    const k = this.k;
+    k.sx = this.head - r - 16; k.sy = y; k.sr = r;
+    this.paint(this.L, k.sx, r + 6, this.drawMoon);
+  }
+
+  drawMoon(c) {
+    const { sx: x, sy: y, sr: r } = this.k;
+    c.globalCompositeOperation = 'destination-out';
+    c.beginPath(); c.arc(x, y, r + 3, 0, 7); c.fill();
+    c.globalCompositeOperation = 'source-over';
+    c.strokeStyle = INK.g;
+    for (const [o, a] of [[0, 0.85], [0.6, 0.3]]) {
+      c.globalAlpha = a;
+      c.lineWidth = 1.2 - o;
+      c.beginPath();
+      c.arc(x + o, y + o, r, Math.PI * 0.32, Math.PI * 1.68);
+      c.arc(x + r * 0.55 + o, y - r * 0.08 + o, r * 0.82, Math.PI * 1.62, Math.PI * 0.38, true);
+      c.stroke();
+    }
+    c.globalAlpha = 1;
+  }
+
   stepRain(dt) {
-    const want = this.rainV * 260 * dt;
+    const want = this.rainV > 0.1 ? this.rainV * 260 * dt : 0;
     let n = Math.floor(want) + (Math.random() < want % 1 ? 1 : 0);
     for (const r of this.drops) {
       if (n <= 0) break;
@@ -327,7 +486,7 @@ export class Stage {
     for (const r of this.drops) {
       if (!r.on) continue;
       r.y += r.v * dt;
-      r.x -= (r.v * 0.18 + SPEED) * dt;
+      r.x -= (r.v * 0.18 + this.v) * dt;
       const wx = this.head - (this.headX - r.x);
       if (r.y - this.lTop > Math.min(this.farAt(wx), this.nearAt(wx)) || r.x < -10) r.on = false;
     }
@@ -482,6 +641,7 @@ export class Stage {
     const c = this.ctx, d = this.d, W = this.W;
     c.setTransform(d, 0, 0, d, 0, 0);
     c.clearRect(0, 0, W, this.H);
+    if (this.shake > 0.05) c.translate((Math.random() - 0.5) * 2 * this.shake, (Math.random() - 0.5) * 2 * this.shake);
     c.drawImage(this.tape.cv, 0, this.sTop, W, this.sH);
     this.blit(this.S, this.sTop, this.sH);
     this.blit(this.L, this.lTop, this.lH);
@@ -526,18 +686,75 @@ export class Stage {
         c.globalAlpha = al * a;
         c.lineWidth = w;
         c.beginPath();
-        for (let i = 0; i < this.boltN; i++) c[i ? 'lineTo' : 'moveTo'](b[i * 2] - SPEED * t, top + b[i * 2 + 1]);
+        for (let i = 0; i < this.boltN; i++) c[i ? 'lineTo' : 'moveTo'](b[i * 2] - this.v * t, top + b[i * 2 + 1]);
         c.stroke();
       }
     }
     c.restore();
 
+    this.renderFx(c);
+
     // Los lápices siguen la punta con un poco de inercia.
     this.sTip += (this.seisY - this.sTip) * 0.55;
     this.lTip += (this.farY - this.lTip) * 0.35;
-    const wob = Math.sin(this.t * 1.7) * 0.015 + (this.boltT < 0.6 ? Math.sin(this.t * 70) * 0.05 * (1 - this.boltT / 0.6) : 0);
+    const wob = Math.sin(this.t * 1.7) * 0.015 + this.windV * Math.sin(this.t * 43) * 0.035 + (this.boltT < 0.6 ? Math.sin(this.t * 70) * 0.05 * (1 - this.boltT / 0.6) : 0);
     this.drawPencil(this.headX, this.sTop + this.sTip, 0.62 + wob + (this.sTip - this.sH / 2) * 0.0015);
     this.drawPencil(this.headX, this.lTop + this.lTip, -0.62 - wob);
+  }
+
+  renderFx(c) {
+    const W = this.W;
+    c.save();
+    c.beginPath(); c.rect(0, this.lTop, W, this.lH); c.clip();
+    // Viento de la subida: rayas veloces que ondulan.
+    if (this.windV > 0.01) {
+      c.strokeStyle = INK.g;
+      c.lineWidth = 0.9;
+      c.globalAlpha = 0.3;
+      c.beginPath();
+      for (const w of this.winds) {
+        if (!w.on) continue;
+        c.moveTo(w.x, w.y);
+        c.quadraticCurveTo(w.x + w.l * 0.5, w.y + Math.sin(w.ph + w.x * 0.02) * 6, w.x + w.l, w.y);
+      }
+      c.stroke();
+    }
+    // Estrellas fugaces.
+    c.strokeStyle = INK.g;
+    for (const m of this.meteors) {
+      if (!m.on) continue;
+      const k = m.t / 0.8, x = m.x - 520 * m.t, y = m.y + 260 * m.t, a = 1 - k;
+      c.globalAlpha = 0.25 * a; c.lineWidth = 2.5;
+      c.beginPath(); c.moveTo(x, y); c.lineTo(x + 90, y - 45); c.stroke();
+      c.globalAlpha = 0.9 * a; c.lineWidth = 1.2;
+      c.beginPath(); c.moveTo(x, y); c.lineTo(x + 26, y - 13); c.stroke();
+    }
+    // Fuegos artificiales: rayos que se abren, caen un poco y se apagan.
+    for (const p of this.fires) {
+      if (!p.on || p.t < 0) continue;
+      const e = 1 - (1 - Math.min(p.t / 1.1, 1)) ** 3, R = p.r * e, drop = p.t * p.t * 14;
+      c.strokeStyle = p.ink;
+      c.globalAlpha = 0.9 * (1 - p.t / 1.7);
+      c.lineWidth = 1.2;
+      c.beginPath();
+      for (let i = 0; i < p.n; i++) {
+        const a = (i / p.n) * Math.PI * 2 + p.r, ca = Math.cos(a), sa = Math.sin(a);
+        c.moveTo(p.x + ca * R * 0.7, p.y + sa * R * 0.7 + drop);
+        c.lineTo(p.x + ca * R, p.y + sa * R + drop);
+      }
+      c.stroke();
+      if (p.t < 0.15) {
+        c.globalAlpha = 1 - p.t / 0.15;
+        c.beginPath(); c.arc(p.x, p.y, 3 + p.t * 30, 0, 7); c.stroke();
+      }
+    }
+    // Destello del drop sobre toda la hoja.
+    if (this.flashT < 0.6) {
+      c.globalAlpha = 0.55 * (1 - this.flashT / 0.6);
+      c.fillStyle = 'rgb(255,253,240)';
+      c.fillRect(0, this.lTop, W, this.lH);
+    }
+    c.restore();
   }
 
   blit(r, top, h) {

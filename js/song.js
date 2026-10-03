@@ -77,3 +77,74 @@ function build() {
 }
 
 export const SONG = { title: 'Canción para lápiz', dur: at(26), events: build() };
+
+// «Cumbre»: techno melódico original a 124 BPM en Re menor, 56 compases (~108 s).
+// Pensada para estrenar la noche, el viento y el drop: corte sin bajo, subida y caída.
+const B2 = 60 / 124;
+const at2 = (bar, beat = 0) => (bar * 4 + beat) * B2;
+const ROOTS2 = [38, 34, 41, 36]; // Re, Si♭, Fa, Do
+const CHORDS2 = [[62, 65, 69], [58, 62, 65], [60, 65, 69], [60, 64, 67]];
+// Frases de la melodía (propias): [pulso, midi, pulsos].
+const LA = [[0, 74, 1.5], [1.5, 77, 0.5], [2, 81, 1], [3, 79, 0.5], [3.5, 77, 0.5], [4, 76, 1.5], [5.5, 74, 0.5], [6, 72, 1], [7, 74, 1]];
+const LB = [[0, 77, 1], [1, 81, 1], [2, 84, 1.5], [3.5, 81, 0.5], [4, 79, 2], [6, 77, 1], [7, 76, 1]];
+
+export const CUMBRE_SECTIONS = [
+  [0, 'I. Amanecer'],
+  [8, 'II. Marcha'],
+  [24, 'III. Noche'],
+  [28, 'IV. Subida'],
+  [32, 'V. Cumbre'],
+  [48, 'VI. Regreso'],
+];
+
+function buildCumbre() {
+  const ev = [];
+  const add = (t, kind, midi, dur, vel = 1) => ev.push([t, kind, midi, dur, vel]);
+  const ci = (b) => (((b % 4) + 4) % 4);
+  const arp = (b, vel, oct = 12) => {
+    const ch = CHORDS2[ci(b)];
+    for (let i = 0; i < 16; i++) add(at2(b, i / 4), 'pluck', ch[[0, 1, 2, 1][i % 4]] + oct + (i >= 8 && i % 4 === 2 ? 12 : 0), B2 * 0.22, vel);
+  };
+  const kick = (b, vel = 1) => { for (let i = 0; i < 4; i++) add(at2(b, i), 'kick', 0, 0, vel); };
+  const bass = (b, vel = 1) => {
+    const r = ROOTS2[ci(b)];
+    for (let i = 0; i < 4; i++) add(at2(b, i + 0.5), 'low', r + (i === 3 ? 12 : 0), B2 * 0.4, vel);
+  };
+  const lead = (b, phrase, vel = 1, shift = 0) => phrase.forEach(([p, n, d]) => add(at2(b, p), 'lead', n + shift, d * B2 * 0.95, vel));
+  const pad = (b, vel = 1, kind = 'pad') => CHORDS2[ci(b)].forEach((n) => add(at2(b), kind, n, 4 * B2, vel));
+
+  // I. Amanecer (0–7): colchón y arpegio; el bombo entra a la mitad.
+  for (let b = 0; b < 8; b++) { pad(b, 0.8); arp(b, 0.35 + b * 0.04); if (b >= 4) kick(b, 0.85); }
+  // II. Marcha (8–23): bombo, bajo a contratiempo, arpegio y melodía desde el compás 16.
+  for (let b = 8; b < 24; b++) {
+    kick(b); bass(b); arp(b, 0.55); pad(b, 0.6);
+    if (b >= 16 && b % 2 === 0) lead(b, (b / 2) % 2 ? LB : LA, 0.75);
+  }
+  // III. Noche (24–27): se va el bajo; colchón y melodía sola.
+  for (let b = 24; b < 28; b++) { pad(b, 1); if (b % 2 === 0) lead(b, b === 24 ? LA : LB, 0.7); }
+  // IV. Subida (28–31): sin bombo; el ruido sube y el arpegio crece hasta un pulso de silencio.
+  add(at2(28), 'riser', 0, at2(4) - B2, 1);
+  for (let b = 28; b < 32; b++) {
+    pad(b, 0.9);
+    arp(b, 0.3 + (b - 28) * 0.12);
+  }
+  // V. Cumbre (32–47): el drop. Acordes gruesos con bombeo, crash cada 8 compases.
+  for (let b = 32; b < 48; b++) {
+    kick(b, 1.1); bass(b, 1.05); add(at2(b), 'low', ROOTS2[ci(b)] - 12, B2 * 0.9, 0.9);
+    pad(b, 1, 'saw');
+    arp(b, 0.5, 24);
+    if (b % 2 === 0) lead(b, (b / 2) % 2 ? LB : LA, 1, 12);
+    if (b % 8 === 0) add(at2(b), 'crash', 0, 0, 1);
+  }
+  // VI. Regreso (48–55): se apaga en capas hasta el silencio.
+  for (let b = 48; b < 56; b++) {
+    if (b < 52) { kick(b, 0.8 - (b - 48) * 0.15); arp(b, 0.4 - (b - 48) * 0.06); }
+    if (b < 54) pad(b, 0.7 - (b - 48) * 0.1);
+  }
+  add(at2(48), 'crash', 0, 0, 0.6);
+
+  CUMBRE_SECTIONS.forEach(([b, name]) => add(at2(b), 'section', 0, 0, name));
+  return ev.sort((a, b) => a[0] - b[0]);
+}
+
+export const CUMBRE = { title: 'Cumbre', dur: at2(56), events: buildCumbre() };

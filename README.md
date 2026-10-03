@@ -8,7 +8,8 @@ Publicado en GitHub Pages: https://gabsplat.github.io/sonido-visible/ (rama `mai
 
 ```sh
 pnpm start            # servidor estático en 127.0.0.1:4400 (PORT para cambiarlo)
-pnpm shot 8,24        # arranca la canción, captura en esos segundos y mide el costo por cuadro (BTN=#demo para la demo)
+pnpm shot 8,24        # arranca la canción, captura en esos segundos y mide el costo por cuadro (BTN=#cumbre o #demo)
+pnpm forma            # recorre «Cumbre» y registra noche, viento y drop
 ```
 
 El micrófono sólo funciona en HTTPS (o localhost).
@@ -27,12 +28,19 @@ Vista previa temporal: unidad de usuario transitoria `sonido-visible-preview.ser
 - **Medios sostenidos sin ruido (acordes largos) → nubes.**
 - **Silencio → lago:** el valle se llena de agua, con ondas en tinta azul y el reflejo de la cordillera.
 
+Además se sigue la forma del tema con una banda de sub-graves (30–150 Hz, sólo bombo y bajo):
+
+- **Corte (los sub-graves caen a un tercio de lo que venían siendo) → noche:** el cielo se sombrea, aparecen estrellas y una luna, y los agudos se vuelven estrellas fugaces en vez de pájaros.
+- **Subida (ruido que crece sin bajo) → viento:** rayas veloces que cruzan la hoja y lápices que tiemblan.
+- **Drop (vuelve el bombo después de una subida o de un corte largo) → cumbre:** destello, fuegos artificiales, una aurora en tinta azul y verde, crestas más gruesas, el papel acelera y la hoja tiembla con cada bombo. Los golpes fuertes durante el drop lanzan más fuegos.
+
 Cada banda se normaliza contra un piso de ruido y un pico que se adaptan solos, así funciona con micrófonos distintos.
 
 ## Fuentes
 
 - **Canción para lápiz** (`js/song.js`): 26 compases en La menor a 96 BPM, unos 65 s en bucle, escrita para el paisaje. Seis partes: I. Agua quieta (silencio y colchón: lago y nubes), II. Cordillera (bajo y melodía), III. Bandada (llamados de pájaros), IV. Tormenta (lluvia, bajo picado y truenos), V. Claro (acorde fuerte: sol) y VI. Lago (se apaga). El nombre de cada parte queda anotado en la cinta. Todo se sintetiza en vivo con Web Audio.
-- Micrófono, archivo de audio (en bucle) y una demo generativa que recorre cordillera, bosque, bandada, llanura y tormenta.
+- **Cumbre** (`js/song.js`): techno melódico original a 124 BPM en Re menor, 56 compases (~108 s): I. Amanecer, II. Marcha, III. Noche, IV. Subida, V. Cumbre (el drop, con bombeo de *sidechain*) y VI. Regreso.
+- Micrófono, archivo de audio (en bucle; también se puede arrastrar a la hoja) y una demo generativa que recorre cordillera, bosque, bandada, llanura y tormenta.
 - Teclado: `Z–M` graves (se sostienen), `A–L` medios, `Q–P` trinos agudos.
 - Arrastrar sobre la hoja: theremín (arriba agudo, abajo grave).
 - Guardar PNG exporta la hoja con papel, título y fecha. Hoja nueva la limpia.
@@ -40,3 +48,5 @@ Cada banda se normaliza contra un piso de ruido y un pico que se adaptan solos, 
 ## Cómo está hecho
 
 El papel avanza a 72 px/s bajo un lápiz fijo. Cinta y paisaje se dibujan de a poco en dos lienzos circulares; sólo se pinta lo nuevo y se borra lo que el lápiz todavía no alcanzó, y la pantalla los copia en cada cuadro. Las colinas borran (`destination-out`) lo que tapan; árboles y soles se dibujan con demora para que el borrado no los corte. Costo medido en Chromium headless a 1440×900: p95 ≈ 1,2 ms de trabajo por cuadro.
+
+Los archivos propios se analizan en el navegador y no se suben a ningún lado. El repositorio no incluye música de terceros: las dos canciones se sintetizan desde el código.

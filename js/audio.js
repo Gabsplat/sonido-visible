@@ -1,9 +1,8 @@
 // Entrada de sonido (micrófono, archivo, canción, sintetizador, demo) y análisis por bandas.
 import { clamp } from './core.js';
-import { SONG } from './song.js';
 
 const MINOR_PENT = [0, 3, 5, 7, 10, 12, 15, 17, 19, 22];
-const BANDS = [[40, 250], [250, 2000], [2500, 9000]]; // graves, medios, agudos
+const BANDS = [[40, 250], [250, 2000], [2500, 9000], [30, 150]]; // graves, medios, agudos, sub (sólo bombo y bajo)
 const COOLDOWN = [0.3, 0.22, 0.09];
 
 export const noteFreq = (base, step) => base * 2 ** (MINOR_PENT[step % MINOR_PENT.length] / 12 + Math.floor(step / MINOR_PENT.length));
@@ -16,15 +15,15 @@ export class Sound {
     this.onSection = null;
     // Rasgos que lee el dibujo en cada cuadro. Se reutiliza el mismo objeto.
     this.f = {
-      low: 0, mid: 0, high: 0, level: 0,
+      low: 0, mid: 0, high: 0, sub: 0, level: 0,
       noise: 0, // qué tan parejo (ruidoso, sin tono) es el espectro agudo: lluvia
       onset: new Float32Array(3), // fuerza del ataque por banda (0 = nada este cuadro)
       loud: 0, // golpe fuerte de volumen general
       time: new Float32Array(2048),
     };
-    this.floor = new Float32Array([0.04, 0.04, 0.03]);
-    this.peak = new Float32Array([0.35, 0.35, 0.3]);
-    this.avg = new Float32Array(3);
+    this.floor = new Float32Array([0.04, 0.04, 0.03, 0.04]);
+    this.peak = new Float32Array([0.35, 0.35, 0.3, 0.35]);
+    this.avg = new Float32Array(4);
     this.last = new Float32Array([-9, -9, -9]);
     this.levelAvg = 0;
     this.lastLoud = -9;
@@ -73,7 +72,7 @@ export class Sound {
     for (let i = 0; i < f.time.length; i += 4) sum += f.time[i] * f.time[i];
     f.level = Math.sqrt(sum / (f.time.length / 4));
 
-    for (let b = 0; b < 3; b++) {
+    for (let b = 0; b < 4; b++) {
       const [a, z] = this.ranges[b];
       let s = 0, mx = 0;
       for (let i = a; i < z; i++) { s += bins[i]; if (bins[i] > mx) mx = bins[i]; }
@@ -82,6 +81,7 @@ export class Sound {
       this.floor[b] = v < this.floor[b] ? v : this.floor[b] + (v - this.floor[b]) * 0.0006;
       this.peak[b] = Math.max(v, this.peak[b] * 0.9994, this.floor[b] + 0.18);
       const n = clamp((v - this.floor[b] - 0.015) / (this.peak[b] - this.floor[b]));
+      if (b === 3) { f.sub = n; continue; }
       if (b === 0) f.low = n; else if (b === 1) f.mid = n; else {
         f.high = n;
         // Un tono deja pocos bandas cerca del máximo; el ruido, casi todas.
@@ -170,6 +170,28 @@ export class Sound {
       const lp = lowpass(900);
       for (const dt of [-9, 0, 8]) osc('sawtooth', freq, dt).connect(lp);
       g.gain.linearRampToValueAtTime(0.07 * vel, t + 1.2);
+    } else if (kind === 'saw') {
+      // Supersierra del drop: cinco sierras desafinadas y un filtro abierto.
+      const lp = lowpass(3200);
+      for (const dt of [-18, -8, 0, 9, 17]) osc('sawtooth', freq, dt).connect(lp);
+      g.gain.linearRampToValueAtTime(0.06 * vel, t + 0.02);
+    } else if (kind === 'lead') {
+      const lp = lowpass(2600, 2);
+      osc('sawtooth', freq, -5).connect(lp);
+      osc('square', freq, 5).connect(lp);
+      const lfo = ctx.createOscillator(), depth = ctx.createGain();
+      lfo.frequency.value = 5.2;
+      depth.gain.setValueAtTime(0, t);
+      depth.gain.linearRampToValueAtTime(14, t + 0.4);
+      lfo.connect(depth);
+      for (const o of srcs) depth.connect(o.detune);
+      lfo.start(t);
+      srcs.push(lfo);
+      g.gain.linearRampToValueAtTime(0.13 * vel, t + 0.02);
+    } else if (kind === 'pluck') {
+      osc('square', freq).connect(lowpass(1800 + vel * 1500));
+      g.gain.linearRampToValueAtTime(0.12 * vel, t + 0.004);
+      g.gain.setTargetAtTime(0, t + 0.01, 0.07);
     } else if (kind === 'stab') {
       const lp = lowpass(2400);
       for (const dt of [-6, 6]) osc('sawtooth', freq, dt).connect(lp);
@@ -236,6 +258,44 @@ export class Sound {
     o.stop(t + 1.1);
   }
 
+  kick(t, vel = 1, dest = this.out) {
+    const ctx = this.ctx, o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.setValueAtTime(150, t);
+    o.frequency.exponentialRampToValueAtTime(46, t + 0.11);
+    g.gain.setValueAtTime(0.95 * vel, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.42);
+    o.connect(g).connect(dest);
+    o.start(t);
+    o.stop(t + 0.45);
+    // Bombeo: el colchón se agacha con cada golpe.
+    if (this.duck) {
+      this.duck.gain.setValueAtTime(0.25, t);
+      this.duck.gain.setTargetAtTime(1, t + 0.03, 0.11);
+    }
+  }
+
+  // Subida: ruido filtrado que barre hacia los agudos y crece.
+  riser(t, dur, vel = 1, dest = this.out) {
+    const ctx = this.ctx, bp = ctx.createBiquadFilter(), g = ctx.createGain();
+    bp.type = 'bandpass';
+    bp.Q.value = 1.4;
+    bp.frequency.setValueAtTime(500, t);
+    bp.frequency.exponentialRampToValueAtTime(9000, t + dur);
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.exponentialRampToValueAtTime(0.35 * vel, t + dur);
+    g.gain.linearRampToValueAtTime(0, t + dur + 0.05);
+    this.noiseSrc(t, dur + 0.1).connect(bp).connect(g).connect(dest);
+  }
+
+  crash(t, vel = 1, dest = this.out) {
+    const ctx = this.ctx, hp = ctx.createBiquadFilter(), g = ctx.createGain();
+    hp.type = 'highpass';
+    hp.frequency.value = 5000;
+    g.gain.setValueAtTime(0.5 * vel, t);
+    g.gain.exponentialRampToValueAtTime(0.005, t + 2.2);
+    this.noiseSrc(t, 2.3).connect(hp).connect(g).connect(dest);
+  }
+
   play(kind, freq, dur, at = 0) {
     const t = this.ensure().currentTime + at;
     if (kind === 'high') return this.chirp(freq, t);
@@ -281,12 +341,15 @@ export class Sound {
   // Agenda los eventos con un cuarto de segundo de anticipación sobre el reloj de audio
   // y vuelve a empezar al terminar. Va por su propio bus para poder cortarla de golpe.
 
-  startSong() {
+  startSong(song) {
     const ctx = this.ensure();
     this.stopSources();
-    this.mode = 'canción';
+    this.song = song;
+    this.mode = song.title;
     this.bus = ctx.createGain();
     this.bus.connect(this.out);
+    this.duck = ctx.createGain();
+    this.duck.connect(this.bus);
     this.songT0 = ctx.currentTime + 0.15;
     this.ei = 0;
     this.songTimer = setInterval(() => this.songStep(), 40);
@@ -300,12 +363,13 @@ export class Sound {
     const bus = this.bus, t = this.ctx.currentTime;
     bus.gain.setTargetAtTime(0, t, 0.08);
     setTimeout(() => bus.disconnect(), 600);
+    this.duck = null;
     for (const id of this.sectionTimers || []) clearTimeout(id);
     this.sectionTimers = [];
   }
 
   songStep() {
-    const ctx = this.ctx, ev = SONG.events, horizon = ctx.currentTime + 0.25;
+    const ctx = this.ctx, song = this.song, ev = song.events, horizon = ctx.currentTime + 0.25;
     for (;;) {
       const e = ev[this.ei], t = this.songT0 + e[0];
       if (t > horizon) break;
@@ -317,8 +381,15 @@ export class Sound {
       } else if (kind === 'high') this.chirp(f, t, 1, bus);
       else if (kind === 'rain') this.rain(t, dur, vel, bus);
       else if (kind === 'thunder') this.thunder(t, vel, bus);
-      else this.release(this.voice(kind, f, t, vel, bus), t + dur, kind === 'pad' ? 0.9 : kind === 'low' ? 0.2 : 0.12);
-      if (++this.ei >= ev.length) { this.ei = 0; this.songT0 += SONG.dur; }
+      else if (kind === 'kick') this.kick(t, vel, bus);
+      else if (kind === 'riser') this.riser(t, dur, vel, bus);
+      else if (kind === 'crash') this.crash(t, vel, bus);
+      else {
+        const ducked = kind === 'pad' || kind === 'saw';
+        const tail = kind === 'pad' ? 0.9 : kind === 'saw' ? 0.25 : kind === 'low' ? 0.2 : kind === 'pluck' ? 0.05 : 0.12;
+        this.release(this.voice(kind, f, t, vel, ducked ? this.duck : bus), t + dur, tail);
+      }
+      if (++this.ei >= ev.length) { this.ei = 0; this.songT0 += song.dur; }
     }
   }
 
